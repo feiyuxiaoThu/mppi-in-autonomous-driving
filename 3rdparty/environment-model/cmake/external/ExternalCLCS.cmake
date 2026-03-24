@@ -6,9 +6,7 @@ set(CR_CLCS_BUILD_S11N ON)
 FetchContent_Declare(
         CommonRoadCLCS
         SYSTEM
-        # Release tag v2025.2.0
-        GIT_REPOSITORY https://github.com/CommonRoad/commonroad-clcs.git
-        GIT_TAG 34040496aa71a6244c99ce3236d3c395731b940b
+        SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../external/commonroad-clcs
 )
 
 FetchContent_MakeAvailable(CommonRoadCLCS)

@@ -1,18 +1,17 @@
-# Fetch and provide tsl::robin_map header-only hash map if not already available
-
+# Use local robin-map instead of fetching from GitHub
 if(NOT TARGET tsl::robin_map)
-    include(FetchContent)
-    message(STATUS "Fetching robin-map (tsl::robin_map) dependency")
-    FetchContent_Declare(tsl_robin_map
-        GIT_REPOSITORY https://github.com/Tessil/robin-map.git
-        GIT_TAG v1.0.1
-    )
-    FetchContent_GetProperties(tsl_robin_map)
-    if(NOT tsl_robin_map_POPULATED)
-        FetchContent_Populate(tsl_robin_map)
-        # Header-only interface target
-        add_library(tsl_robin_map INTERFACE)
-        target_include_directories(tsl_robin_map INTERFACE ${tsl_robin_map_SOURCE_DIR}/include)
-        add_library(tsl::robin_map ALIAS tsl_robin_map)
-    endif()
+    # Get absolute path to robin-map in external directory
+    get_filename_component(ROBIN_MAP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../external/robin-map" ABSOLUTE)
+    message(STATUS "Using local robin-map from ${ROBIN_MAP_DIR}")
+
+    # Header-only interface target
+    add_library(tsl_robin_map INTERFACE)
+    target_include_directories(tsl_robin_map INTERFACE
+        $<BUILD_INTERFACE:${ROBIN_MAP_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+    add_library(tsl::robin_map ALIAS tsl_robin_map)
+
+    # Mark as populated for FetchContent
+    set(tsl_robin_map_POPULATED TRUE CACHE BOOL "" FORCE)
+    set(tsl_robin_map_SOURCE_DIR ${ROBIN_MAP_DIR} CACHE PATH "" FORCE)
 endif()

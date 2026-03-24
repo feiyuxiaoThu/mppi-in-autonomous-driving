@@ -239,9 +239,7 @@ cmake_dependent_option(ENV_MODEL_SYSTEM_PACKAGES_FORCE
 include(FetchContent)
 FetchContent_Declare(
     commonroad_cmake
-
-    GIT_REPOSITORY https://gitlab.lrz.de/tum-cps/commonroad-cmake.git
-    GIT_TAG        main
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../external/commonroad-cmake
 )
 FetchContent_MakeAvailable(commonroad_cmake)
 

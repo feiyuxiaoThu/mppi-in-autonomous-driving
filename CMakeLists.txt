@@ -5,7 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CUDA_ARCHITECTURES 75)
+set(CMAKE_CUDA_ARCHITECTURES 86)
+
+# Set RPATH to find shared libraries in 3rdparty/foxglove/lib
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_BUILD_RPATH "${PROJECT_SOURCE_DIR}/3rdparty/foxglove/lib")
 # Suppress CUDA warnings from Eigen library interactions
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe=--diag_suppress=20014>)
@@ -23,6 +27,9 @@ find_package(yaml-cpp REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Protobuf REQUIRED)
+
+# Add local robin-map include path (before subdirectories)
+include_directories(${PROJECT_SOURCE_DIR}/external/robin-map/include)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/environment-model)
 set(MPPI_BUILD_TESTS OFF CACHE BOOL "Disable MPPI tests/internal libs" FORCE)
@@ -60,9 +67,10 @@ file(GLOB FOXGLOVE_SOURCES CONFIGURE_DEPENDS
     "${FOXGLOVE_SOURCE_DIR}/src/server/*.cpp"
 )
 
-add_library(foxglove_sdk STATIC IMPORTED)
+add_library(foxglove_sdk SHARED IMPORTED)
 set_target_properties(foxglove_sdk PROPERTIES
     IMPORTED_LOCATION "${FOXGLOVE_SOURCE_DIR}/lib/libfoxglove.so"
+    IMPORTED_NO_SONAME TRUE
     INTERFACE_INCLUDE_DIRECTORIES "${FOXGLOVE_SOURCE_DIR}/include"
 )
 
