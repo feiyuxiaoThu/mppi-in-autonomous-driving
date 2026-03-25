@@ -342,9 +342,11 @@ protos::planning::PlanningInfo StochasticOptimizer<NUM_ROLLOUTS>::get_debug_resu
   LOG_DEBUG(logger_, "StochasticOptimizer get_debug_result cost time: {:.2f} ms",
             get_debug_result_tic.toc() * 1000.0);
 
+#ifdef USE_VISUALIZER
   if (visualizer_) {
     visualizer_->log_planning_info(planning_info);
   }
+#endif
 
   return planning_info;
 }

@@ -123,17 +123,54 @@ set_target_properties(planner PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
+target_compile_definitions(planner
+    PUBLIC
+        USE_FOXGLOVE
+        USE_VISUALIZER
+)
 target_include_directories(planner
     PUBLIC
         ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
         ${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic/include
         ${PROJECT_SOURCE_DIR}
+        ${FOXGLOVE_SOURCE_DIR}/include
 )
 target_link_libraries(planner
     PUBLIC
         Eigen3::Eigen
         MPPI::MPPI
         EnvironmentModel::env_model
+)
+
+# Simple simulator (lightweight replacement for CommonRoad)
+file(GLOB SIMPLE_SIMULATOR_SOURCES CONFIGURE_DEPENDS "modules/simple_simulator/*.cpp")
+add_library(simple_simulator SHARED ${SIMPLE_SIMULATOR_SOURCES} ${COMMON_SOURCES})
+target_include_directories(simple_simulator
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}
+)
+target_link_libraries(simple_simulator
+    PUBLIC
+        spdlog::spdlog
+        yaml-cpp
+)
+
+# Standalone planner library (no simulation/visualization dependencies)
+add_library(planner_standalone SHARED ${PLANNER_SOURCES} ${COMMON_SOURCES})
+set_target_properties(planner_standalone PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+)
+target_include_directories(planner_standalone
+    PUBLIC
+        ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+        ${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic/include
+        ${PROJECT_SOURCE_DIR}
+)
+target_link_libraries(planner_standalone
+    PUBLIC
+        Eigen3::Eigen
+        MPPI::MPPI
 )
 
 # Executable
@@ -163,3 +200,21 @@ if(ENABLE_WARNINGS)
         target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wpedantic)
     endforeach()
 endif()
+
+# Standalone planning node (lightweight closed-loop simulation)
+add_executable(planning_node_standalone modules/planning_node_standalone.cpp ${PROTO_SRCS})
+add_dependencies(planning_node_standalone generate_proto)
+target_include_directories(planning_node_standalone
+    PRIVATE
+        ${PROTO_OUTPUT_DIR}
+        ${Protobuf_INCLUDE_DIRS}
+)
+target_link_libraries(planning_node_standalone
+    PRIVATE
+        planner_standalone
+        simple_simulator
+        spdlog::spdlog
+        yaml-cpp
+        Threads::Threads
+        ${Protobuf_LIBRARIES}
+)
