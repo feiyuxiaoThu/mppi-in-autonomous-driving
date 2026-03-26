@@ -17,16 +17,10 @@
 #include "mppi/feedback_controllers/DDP/ddp.cuh"
 #include "trajectory_cost.cuh"
 #include "vehicle_dynamics.cuh"
-
-#ifdef USE_VISUALIZER
 #include "modules/visualizer/visualizer.hpp"
-#endif
 
 #include <Eigen/Core>
 #include <memory>
-
-// Forward declaration for standalone builds without visualizer
-class Visualizer;
 
 template <int NUM_ROLLOUTS>
 class StochasticOptimizer {

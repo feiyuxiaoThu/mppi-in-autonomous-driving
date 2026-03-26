@@ -9,10 +9,7 @@
 
 #pragma once
 
-// Foxglove is optional - only needed for visualization
-#ifdef USE_FOXGLOVE
 #include "foxglove/schemas.hpp"
-#endif
 #include "common/protos/config.pb.h"
 
 #include <yaml-cpp/yaml.h>
@@ -63,7 +60,6 @@ struct StateInfo {
   double accel{0};     // acceleration (m/s^2)
   double steer{0};     // front wheel steering angle (rad)
 
-#ifdef USE_FOXGLOVE
   foxglove::schemas::Pose to_pose() const {
     const double half_yaw = 0.5 * heading;
     foxglove::schemas::Pose pose;
@@ -71,7 +67,6 @@ struct StateInfo {
     pose.orientation = foxglove::schemas::Quaternion{0.0, 0.0, sin(half_yaw), cos(half_yaw)};
     return pose;
   }
-#endif
 };
 
 struct VehicleInfo {
@@ -97,7 +92,6 @@ public:
     return duration_cast<microseconds>(duration).count() / 1e6;
   }
 
-#ifdef USE_FOXGLOVE
   static foxglove::schemas::Timestamp NowTimestamp() {
     using namespace std::chrono;
     auto now = system_clock::now();
@@ -109,7 +103,6 @@ public:
     ts.nsec = static_cast<uint32_t>(nsec);
     return ts;
   }
-#endif
 
   static std::string NowTimeString() {
     using namespace std::chrono;

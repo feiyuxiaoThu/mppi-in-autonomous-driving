@@ -31,14 +31,13 @@ find_package(Protobuf REQUIRED)
 # Add local robin-map include path (before subdirectories)
 include_directories(${PROJECT_SOURCE_DIR}/external/robin-map/include)
 
-add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/environment-model)
+# MPPI-Generic (core planning algorithm)
 set(MPPI_BUILD_TESTS OFF CACHE BOOL "Disable MPPI tests/internal libs" FORCE)
 set(MPPI_BUILD_EXAMPLES OFF CACHE BOOL "Disable MPPI examples" FORCE)
 set(MPPI_USE_CUDA_BARRIERS OFF CACHE BOOL "Disable CUDA barriers for older GPUs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic)
 
 # Protobuf: generate sources
-# set(PROTO_FILES "${PROJECT_SOURCE_DIR}/common/protos/planning_info.proto")
 file(GLOB PROTO_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/common/protos/*.proto")
 set(PROTO_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/common/protos")
 set(PROTO_SRCS "")
@@ -75,7 +74,6 @@ set_target_properties(foxglove_sdk PROPERTIES
 )
 
 # Sources
-file(GLOB SIMULATOR_SOURCES CONFIGURE_DEPENDS "modules/simulator/*.cpp")
 file(GLOB PLANNER_SOURCES CONFIGURE_DEPENDS
     "modules/planner/*.cpp"
     "modules/planner/*.cu"
@@ -85,8 +83,8 @@ file(GLOB COMMON_SOURCES CONFIGURE_DEPENDS "common/*.cpp")
 
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${FOXGLOVE_SOURCE_DIR}/include)
-include_directories(${PROJECT_SOURCE_DIR}/3rdparty/environment-model/include/)
 
+# Visualizer library (Foxglove-based visualization)
 add_library(visualizer SHARED ${VISUALIZER_SOURCES} ${COMMON_SOURCES})
 target_compile_definitions(visualizer 
     PUBLIC 
@@ -99,47 +97,8 @@ target_include_directories(visualizer
 )
 target_link_libraries(visualizer
     PUBLIC
-        EnvironmentModel::env_model
-)
-
-# Simulator library
-add_library(simulator SHARED ${SIMULATOR_SOURCES} ${COMMON_SOURCES})
-target_compile_definitions(simulator 
-    PUBLIC 
-        PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-)
-target_include_directories(simulator
-    PUBLIC
-        ${PROJECT_SOURCE_DIR}
-)
-target_link_libraries(simulator
-    PUBLIC
-        EnvironmentModel::env_model
-        visualizer
-)
-
-add_library(planner SHARED ${PLANNER_SOURCES} ${COMMON_SOURCES})
-set_target_properties(planner PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-)
-target_compile_definitions(planner
-    PUBLIC
-        USE_FOXGLOVE
-        USE_VISUALIZER
-)
-target_include_directories(planner
-    PUBLIC
-        ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
-        ${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic/include
-        ${PROJECT_SOURCE_DIR}
-        ${FOXGLOVE_SOURCE_DIR}/include
-)
-target_link_libraries(planner
-    PUBLIC
-        Eigen3::Eigen
-        MPPI::MPPI
-        EnvironmentModel::env_model
+        spdlog::spdlog
+        yaml-cpp
 )
 
 # Simple simulator (lightweight replacement for CommonRoad)
@@ -155,37 +114,38 @@ target_link_libraries(simple_simulator
         yaml-cpp
 )
 
-# Standalone planner library (no simulation/visualization dependencies)
-add_library(planner_standalone SHARED ${PLANNER_SOURCES} ${COMMON_SOURCES})
-set_target_properties(planner_standalone PROPERTIES
+# Planner library (with Foxglove visualization support)
+add_library(planner SHARED ${PLANNER_SOURCES} ${COMMON_SOURCES})
+set_target_properties(planner PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
-target_include_directories(planner_standalone
+target_include_directories(planner
     PUBLIC
         ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
         ${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic/include
         ${PROJECT_SOURCE_DIR}
+        ${FOXGLOVE_SOURCE_DIR}/include
 )
-target_link_libraries(planner_standalone
+target_link_libraries(planner
     PUBLIC
         Eigen3::Eigen
         MPPI::MPPI
 )
 
-# Executable
-add_executable(planning_node modules/planning_node.cpp ${PROTO_SRCS})
-add_dependencies(planning_node generate_proto)
-target_sources(planning_node PRIVATE ${FOXGLOVE_SOURCES})
-target_include_directories(planning_node
+# Standalone planning node (lightweight closed-loop simulation with visualization)
+add_executable(planning_node_standalone modules/planning_node_standalone.cpp ${PROTO_SRCS})
+add_dependencies(planning_node_standalone generate_proto)
+target_sources(planning_node_standalone PRIVATE ${FOXGLOVE_SOURCES})
+target_include_directories(planning_node_standalone
     PRIVATE
         ${PROTO_OUTPUT_DIR}
         ${Protobuf_INCLUDE_DIRS}
 )
-target_link_libraries(planning_node
+target_link_libraries(planning_node_standalone
     PRIVATE
-        simulator
         planner
+        simple_simulator
         visualizer
         spdlog::spdlog
         yaml-cpp
@@ -196,25 +156,5 @@ target_link_libraries(planning_node
 )
 
 if(ENABLE_WARNINGS)
-    foreach(tgt simulator planning_node)
-        target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wpedantic)
-    endforeach()
+    target_compile_options(planning_node_standalone PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-
-# Standalone planning node (lightweight closed-loop simulation)
-add_executable(planning_node_standalone modules/planning_node_standalone.cpp ${PROTO_SRCS})
-add_dependencies(planning_node_standalone generate_proto)
-target_include_directories(planning_node_standalone
-    PRIVATE
-        ${PROTO_OUTPUT_DIR}
-        ${Protobuf_INCLUDE_DIRS}
-)
-target_link_libraries(planning_node_standalone
-    PRIVATE
-        planner_standalone
-        simple_simulator
-        spdlog::spdlog
-        yaml-cpp
-        Threads::Threads
-        ${Protobuf_LIBRARIES}
-)

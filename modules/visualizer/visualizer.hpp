@@ -1,8 +1,9 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2026-01-19 00:00:00
- * @LastEditTime: 2026-01-21 01:02:09
+ * @LastEditTime: 2026-03-25
  * @FilePath: /mppi-in-autonomous-driving/modules/visualizer/visualizer.hpp
+ * Simplified visualizer without CommonRoad dependencies
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
@@ -13,9 +14,6 @@
 #include "common/protos/config.pb.h"
 #include "common/protos/planning_info.pb.h"
 #include "common/reference_line.hpp"
-#include "commonroad_cpp/obstacle/obstacle.h"
-#include "commonroad_cpp/roadNetwork/lanelet/lanelet.h"
-#include "commonroad_cpp/roadNetwork/road_network.h"
 #include "foxglove/foxglove.hpp"
 #include "foxglove/mcap.hpp"
 #include "foxglove/server.hpp"
@@ -40,11 +38,6 @@ public:
   bool start();
   void stop();
 
-  // Set world reference for visualization
-  void set_road_network(const std::shared_ptr<RoadNetwork>& road_network) {
-    road_network_ = road_network;
-  }
-
   // Publish visualization data
   void log_ego_state(const StateInfo& ego_state);
   void log_transform(const foxglove::schemas::FrameTransform& transform);
@@ -53,13 +46,10 @@ public:
   void log_trajectory(const protos::planning::PlanningInfo& planning_info);
   void log_sampled_trajectories(const protos::planning::PlanningInfo& planning_info);
   void log_reference_line(const std::shared_ptr<ReferenceLine>& reference_line);
-  void log_lanelets(const std::vector<std::shared_ptr<Lanelet>>& lanelets);
-  void log_obstacles(const std::vector<std::shared_ptr<Obstacle>>& obstacles, size_t sim_world_step,
+  void log_obstacles(const std::shared_ptr<common::ObstacleList>& obstacle_list,
                      const StateInfo& current_ego_state, double perception_range_m);
-  void log_obstacle_predictions(
-      const std::vector<std::shared_ptr<Obstacle>>& obstacles,
-      const std::unordered_map<std::string, std::vector<PathPoint>>& predict_trajs,
-      size_t sim_world_step, const StateInfo& current_ego_state, double perception_range_m);
+  void log_obstacle_predictions(const std::shared_ptr<common::ObstacleList>& obstacle_list,
+                                const StateInfo& current_ego_state, double perception_range_m);
   void log_simulation_config(const protos::config::SimulationConfig& sim_config);
 
 private:
@@ -69,7 +59,7 @@ private:
   foxglove::Schema build_protobuf_schema(const google::protobuf::Descriptor* message_descriptor,
                                          std::vector<std::uint8_t>& schema_buffer) const;
 
-  // Scene update generation methods (extracted from Simulator)
+  // Scene update generation methods
   foxglove::schemas::SceneUpdate get_ego_scene_update(const StateInfo& ego_state) const;
   foxglove::schemas::SceneUpdate get_trajectory_scene_update(
       const protos::planning::PlanningInfo& planning_info) const;
@@ -78,14 +68,11 @@ private:
   foxglove::schemas::SceneUpdate get_reference_line_scene_update(
       const std::shared_ptr<ReferenceLine>& reference_line);
   foxglove::schemas::SceneUpdate get_obstacle_list_scene_update(
-      const std::vector<std::shared_ptr<Obstacle>>& obstacles, size_t sim_world_step,
+      const std::shared_ptr<common::ObstacleList>& obstacle_list,
       const StateInfo& current_ego_state, double perception_range_m);
   foxglove::schemas::SceneUpdate get_prediction_scene_update(
-      const std::vector<std::shared_ptr<Obstacle>>& obstacles,
-      const std::unordered_map<std::string, std::vector<PathPoint>>& predict_trajs,
-      size_t sim_world_step, const StateInfo& current_ego_state, double perception_range_m);
-  foxglove::schemas::SceneUpdate get_lanelets_scene_update(
-      const std::vector<std::shared_ptr<Lanelet>>& lanelets);
+      const std::shared_ptr<common::ObstacleList>& obstacle_list,
+      const StateInfo& current_ego_state, double perception_range_m);
 
 private:
   // Logger
@@ -94,16 +81,12 @@ private:
   // Configuration
   bool save_mcap_{false};
 
-  // World reference
-  std::shared_ptr<RoadNetwork> road_network_{nullptr};
-
   std::unique_ptr<foxglove::McapWriter> mcap_writer_{nullptr};
   std::unique_ptr<foxglove::WebSocketServer> socket_server_{nullptr};
 
   // Channels for different data types
   std::unique_ptr<foxglove::RawChannel> loop_runtime_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::SceneUpdateChannel> ego_car_channel_{nullptr};
-  std::unique_ptr<foxglove::schemas::SceneUpdateChannel> lanelet_scene_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::SceneUpdateChannel> obstacle_list_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::SceneUpdateChannel> obstacle_prediction_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::SceneUpdateChannel> reference_line_channel_{nullptr};
@@ -119,5 +102,4 @@ private:
   // State tracking
   std::atomic<bool> running_{false};
   std::atomic<bool> reference_line_initialized_{false};
-  std::atomic<bool> lanelets_initialized_{false};
 };

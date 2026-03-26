@@ -10,10 +10,6 @@
 #include "common/obstacle.hpp"
 #include "common/reference_line.hpp"
 
-#ifdef USE_VISUALIZER
-#include "modules/visualizer/visualizer.hpp"
-#endif
-
 #include <atomic>
 #include <memory>
 #include <mutex>

@@ -1,17 +1,13 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:04:19
- * @LastEditTime: 2026-01-20 00:34:37
+ * @LastEditTime: 2026-03-25
  * @FilePath: /mppi-in-autonomous-driving/modules/visualizer/visualizer_utils.hpp
+ * Simplified visualization utilities without CommonRoad dependencies
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #pragma once
-
-#include "commonroad_cpp/auxiliaryDefs/types_and_definitions.h" 
-#include "commonroad_cpp/auxiliaryDefs/structs.h"
-#include "commonroad_cpp/roadNetwork/road_network.h"
-#include "commonroad_cpp/roadNetwork/lanelet/lanelet.h"
 
 #include "foxglove/schemas.hpp"
 
@@ -43,8 +39,15 @@ inline foxglove::schemas::Pose construct_pose(void) {
   return pose;
 }
 
+/**
+ * @brief Get obstacle size and color based on obstacle type
+ * @param obstacle_type Obstacle type as integer (0=VEHICLE, 1=PEDESTRIAN, etc.)
+ * @param obstacle_length Obstacle length in meters
+ * @param obstacle_width Obstacle width in meters
+ * @return Tuple of (size vector, color)
+ */
 std::tuple<foxglove::schemas::Vector3, foxglove::schemas::Color> get_obstacle_size_and_color(
-    ObstacleType obstacle_type, double obstacle_length, double obstacle_width);
+    int obstacle_type, double obstacle_length, double obstacle_width);
 
 /**
  * @brief Create a line using mesh triangulation to avoid transparency issues
@@ -62,34 +65,3 @@ std::tuple<foxglove::schemas::Vector3, foxglove::schemas::Color> get_obstacle_si
 foxglove::schemas::TriangleListPrimitive create_line_mesh(
     const std::vector<foxglove::schemas::Point3>& points, double thickness,
     const foxglove::schemas::Color& color, bool gradient_fade = false);
-
-/**
- * @brief Check if a lanelet is at the leftmost or rightmost edge of the road
- *
- * This function determines if a lanelet is at the road edge by checking:
- * 1. Adjacent lanelet existence in the same direction
- * 2. Line marking type (curb, solid, etc.)
- * 3. Recursive check through all same-direction adjacent lanelets
- *
- * @param lanelet The lanelet to check
- * @param road_network The road network containing the lanelet
- * @return std::pair<bool, bool> First: is leftmost, Second: is rightmost
- */
-std::pair<bool, bool> is_lanelet_at_road_edge(const std::shared_ptr<Lanelet>& lanelet,
-                                              const std::shared_ptr<RoadNetwork>& road_network);
-
-/**
- * @brief Determine whether to draw left or right border lines for a lanelet
- *
- * In merge/diverge scenarios, this function intelligently decides which border lines
- * should be drawn to avoid duplicate or missing lines:
- * - In merge scenarios: leftmost lane draws left line, rightmost draws right line
- * - In normal scenarios: draw lines based on road edge detection
- * - Shared borders between adjacent lanes are drawn only once
- *
- * @param lanelet The lanelet to check
- * @param road_network The road network containing the lanelet
- * @return std::pair<bool, bool> First: should draw left line, Second: should draw right line
- */
-std::pair<bool, bool> should_draw_lanelet_borders(const std::shared_ptr<Lanelet>& lanelet,
-                                                  const std::shared_ptr<RoadNetwork>& road_network);

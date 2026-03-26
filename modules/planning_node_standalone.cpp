@@ -2,12 +2,13 @@
  * @Author: puyu yu.pu@qq.com
  * @Date: 2026-03-24
  * @FilePath: /mppi-in-autonomous-driving/modules/planning_node_standalone.cpp
- * Standalone planning node with lightweight simulator (no CommonRoad/Foxglove dependencies)
+ * Standalone planning node with lightweight simulator and Foxglove visualization
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #include "modules/planner/stochastic_optimizer.cuh"
 #include "modules/simple_simulator/simple_simulator.hpp"
+#include "modules/visualizer/visualizer.hpp"
 
 #include <csignal>
 #include <getopt.h>
@@ -46,6 +47,13 @@ int main(int argc, char** argv) {
   spdlog::info("Standalone planning node starting...");
   spdlog::info("Config file: {}", config_file_path);
 
+  // Initialize visualizer
+  auto visualizer = std::make_shared<Visualizer>(config);
+  if (!visualizer->start()) {
+    spdlog::error("Failed to start visualizer");
+    return 1;
+  }
+
   // Initialize lightweight simulator
   auto simulator = std::make_unique<simple_simulator::SimpleSimulator>(config);
   simulator->start();
@@ -59,13 +67,25 @@ int main(int argc, char** argv) {
     }
   });
 
-  // Lambda to run closed-loop planning
+  // Lambda to run closed-loop planning with visualization
   auto run_planning = [&](auto optimizer_ptr) {
     spdlog::info("Planner initialized with {} rollouts",
                  config["planning"]["mppi_params"]["num_samples"].as<int>());
 
+    // Log reference line once at startup
+    visualizer->log_reference_line(simulator->get_reference_line());
+
     // Planning loop rate (default 10 Hz)
-    double planning_dt = config["planning"]["dt"].as<double>(0.1);
+    double planning_dt = 0.1;
+    if (config["planning"]["dt"]) {
+      planning_dt = config["planning"]["dt"].as<double>();
+    }
+    
+    double perception_range = 100.0;
+    if (config["simulation"]["perception_range"]) {
+      perception_range = config["simulation"]["perception_range"].as<double>();
+    }
+    
     int frame_count = 0;
     auto next_tick = std::chrono::steady_clock::now();
 
@@ -97,6 +117,14 @@ int main(int argc, char** argv) {
       // ============================================================
       simulator->set_ego_control_input(control);
 
+      // ============================================================
+      // 6. Visualization
+      // ============================================================
+      visualizer->log_ego_state(ego_state);
+      visualizer->log_obstacles(obstacle_list, ego_state, perception_range);
+      visualizer->log_obstacle_predictions(obstacle_list, ego_state, perception_range);
+      visualizer->log_loop_runtime(frame_timer.toc());
+
       // Logging
       spdlog::info("Frame {}: ego=({:.2f}, {:.2f}), v={:.2f} m/s, "
                    "accel={:.3f} m/s^2, steer={:.4f} rad, time={:.2f} ms",
@@ -117,27 +145,27 @@ int main(int argc, char** argv) {
   int num_rollouts = config["planning"]["mppi_params"]["num_samples"].as<int>(8192);
   switch (num_rollouts) {
     case 1024: {
-      auto optimizer = std::make_unique<StochasticOptimizer<1024>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<1024>>(config, visualizer);
       run_planning(std::move(optimizer));
       break;
     }
     case 2048: {
-      auto optimizer = std::make_unique<StochasticOptimizer<2048>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<2048>>(config, visualizer);
       run_planning(std::move(optimizer));
       break;
     }
     case 4096: {
-      auto optimizer = std::make_unique<StochasticOptimizer<4096>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<4096>>(config, visualizer);
       run_planning(std::move(optimizer));
       break;
     }
     case 8192: {
-      auto optimizer = std::make_unique<StochasticOptimizer<8192>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<8192>>(config, visualizer);
       run_planning(std::move(optimizer));
       break;
     }
     case 16384: {
-      auto optimizer = std::make_unique<StochasticOptimizer<16384>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<16384>>(config, visualizer);
       run_planning(std::move(optimizer));
       break;
     }
@@ -145,9 +173,11 @@ int main(int argc, char** argv) {
       spdlog::error("Unsupported num_rollouts: {}. Supported: 1024, 2048, 4096, 8192, 16384",
                     num_rollouts);
       simulator->stop();
+      visualizer->stop();
       return 1;
   }
 
   simulator->stop();
+  visualizer->stop();
   return 0;
 }
