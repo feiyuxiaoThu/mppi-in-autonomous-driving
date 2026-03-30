@@ -136,13 +136,39 @@ target_link_libraries(planner
 # Standalone planning node (lightweight closed-loop simulation with visualization)
 add_executable(planning_node_standalone modules/planning_node_standalone.cpp ${PROTO_SRCS})
 add_dependencies(planning_node_standalone generate_proto)
+
+# Biased-MPPI Demo node
+add_executable(biased_mppi_demo modules/biased_mppi_demo.cpp ${PROTO_SRCS})
+add_dependencies(biased_mppi_demo generate_proto)
+
 target_sources(planning_node_standalone PRIVATE ${FOXGLOVE_SOURCES})
+target_sources(biased_mppi_demo PRIVATE ${FOXGLOVE_SOURCES})
+
 target_include_directories(planning_node_standalone
     PRIVATE
         ${PROTO_OUTPUT_DIR}
         ${Protobuf_INCLUDE_DIRS}
 )
+target_include_directories(biased_mppi_demo
+    PRIVATE
+        ${PROTO_OUTPUT_DIR}
+        ${Protobuf_INCLUDE_DIRS}
+)
+
 target_link_libraries(planning_node_standalone
+    PRIVATE
+        planner
+        simple_simulator
+        visualizer
+        spdlog::spdlog
+        yaml-cpp
+        foxglove_sdk
+        Threads::Threads
+        ${Protobuf_LIBRARIES}
+        dl
+)
+
+target_link_libraries(biased_mppi_demo
     PRIVATE
         planner
         simple_simulator

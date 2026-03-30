@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <memory>
 #include <string>
+#include <vector>
 
 #define LOG_TRACE(logger, ...) SPDLOG_LOGGER_CALL(logger, spdlog::level::trace, __VA_ARGS__)
 #define LOG_DEBUG(logger, ...) SPDLOG_LOGGER_CALL(logger, spdlog::level::debug, __VA_ARGS__)
@@ -81,6 +82,19 @@ struct PathPoint {
   double yaw;
   double v;
   double t;
+};
+
+struct E2EPriorMode {
+  std::vector<PathPoint> trajectory;
+  float confidence{0.0f};
+  int mode_id{-1};
+  bool valid{true};
+  float alpha{0.0f}; // Normalized weight
+};
+
+struct E2EPriorSet {
+  std::vector<E2EPriorMode> modes;
+  double timestamp{0.0};
 };
 
 class TimeUtil {

@@ -76,9 +76,9 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(
   sampler_ = new SAMPLER_T(sampler_params);
 
   ddp_feedback_ = new DDPFeedback<VehicleDynamics, kHorizonLength>(dynamics_, delta_time_);
-  mppi_controller_ = new VanillaMPPIController<VehicleDynamics, TrajectoryCost,
-                                               DDPFeedback<VehicleDynamics, kHorizonLength>,
-                                               kHorizonLength, NUM_ROLLOUTS>(
+  mppi_controller_ = new BiasedMPPIController<VehicleDynamics, TrajectoryCost,
+                                              DDPFeedback<VehicleDynamics, kHorizonLength>,
+                                              kHorizonLength, NUM_ROLLOUTS>(
       dynamics_, trajectory_cost_, ddp_feedback_, sampler_, delta_time_, max_iter, lambda, alpha);
   auto controller_params = mppi_controller_->getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
@@ -106,7 +106,8 @@ StochasticOptimizer<NUM_ROLLOUTS>::~StochasticOptimizer() {
 template <int NUM_ROLLOUTS>
 ControlInput StochasticOptimizer<NUM_ROLLOUTS>::plan_once(
     const StateInfo& _current_state, const std::shared_ptr<ReferenceLine>& reference_line,
-    const std::shared_ptr<common::ObstacleList>& obstacle_list) {
+    const std::shared_ptr<common::ObstacleList>& obstacle_list,
+    const std::vector<E2EPriorMode>& e2e_priors) {
   // Update waypoints in trajectory cost function
   if (reference_line) {
     trajectory_cost_->setWaypoints(reference_line);
@@ -120,6 +121,93 @@ ControlInput StochasticOptimizer<NUM_ROLLOUTS>::plan_once(
     // Force synchronize params to GPU device
     trajectory_cost_->paramsToDevice();
     LOG_DEBUG(logger_, "Updated {} obstacles to GPU", obstacle_list->obstacles().size());
+  }
+
+  // Handle E2E priors
+  if (!e2e_priors.empty()) {
+    using ControllerType = BiasedMPPIController<VehicleDynamics, TrajectoryCost, DDPFeedback<VehicleDynamics, kHorizonLength>, kHorizonLength, NUM_ROLLOUTS>;
+    
+    // 1. Filter out invalid or empty priors first
+    std::vector<E2EPriorMode> filtered_priors;
+    for (const auto& prior : e2e_priors) {
+      if (prior.valid && !prior.trajectory.empty()) {
+        filtered_priors.push_back(prior);
+      }
+    }
+
+    // 2. Sort remaining valid priors by confidence
+    std::sort(filtered_priors.begin(), filtered_priors.end(), 
+              [](const E2EPriorMode& a, const E2EPriorMode& b) {
+                return a.confidence > b.confidence;
+              });
+    
+    // 3. Truncate to avoid exceeding MAX_DISTRIBUTIONS
+    constexpr int max_priors = SAMPLER_T::SAMPLING_PARAMS_T::MAX_DISTRIBUTIONS - 1;
+    if (filtered_priors.size() > max_priors) {
+      LOG_WARN(logger_, "Truncating valid E2E priors from {} to {} based on confidence", 
+               filtered_priors.size(), max_priors);
+      filtered_priors.resize(max_priors);
+    }
+
+    std::vector<typename ControllerType::control_trajectory> prior_controls;
+    std::vector<float> confidences;
+
+    auto cost_params = trajectory_cost_->getParams();
+    double max_jerk = dynamics_->control_rngs_[0].y;
+    double max_steer_rate = dynamics_->control_rngs_[1].y;
+    double max_steer_angle = cost_params.max_steer_angle;
+
+    for (const auto& prior_mode : filtered_priors) {
+      auto controls_vec = common::ProjectStateTrajectoryToControlPrior(
+          prior_mode.trajectory, dynamics_->getWheelbase(), delta_time_, kHorizonLength,
+          max_jerk, max_steer_rate, max_steer_angle);
+      
+      typename ControllerType::control_trajectory prior_traj;
+      for (int t = 0; t < kHorizonLength; ++t) {
+        prior_traj(0, t) = controls_vec[t].first;  // jerk
+        prior_traj(1, t) = controls_vec[t].second; // steer_rate
+      }
+      prior_controls.push_back(prior_traj);
+      confidences.push_back(std::max(0.01f, prior_mode.confidence));
+    }
+
+    if (!prior_controls.empty()) {
+      mppi_controller_->setPriors(prior_controls);
+      
+      // Compute mixing coefficients (alphas)
+      // We prioritize using the pre-calibrated 'alpha' if any are provided (positive)
+      int m = prior_controls.size();
+      std::vector<float> alphas(m + 1, 0.0f);
+      
+      float sum_alpha = 0.0f;
+      for (const auto& prior : filtered_priors) {
+        sum_alpha += std::max(0.0f, prior.alpha);
+      }
+
+      alphas[0] = 0.2f; // Keep 0.2 for nominal distribution (warm start)
+      
+      if (sum_alpha > 1e-6f) {
+        // Use provided calibrated alpha
+        for (int i = 0; i < m; ++i) {
+          alphas[i + 1] = 0.8f * (std::max(0.0f, filtered_priors[i].alpha) / sum_alpha);
+        }
+        LOG_DEBUG(logger_, "Set {} E2E priors to controller using pre-calibrated alphas", m);
+      } else {
+        // Fallback to confidence-based normalization
+        float sum_conf = std::accumulate(confidences.begin(), confidences.end(), 0.0f);
+        for (int i = 0; i < m; ++i) {
+          alphas[i + 1] = 0.8f * (confidences[i] / sum_conf);
+        }
+        LOG_DEBUG(logger_, "Set {} E2E priors to controller using confidence-based alphas", m);
+      }
+      
+      mppi_controller_->setMixingCoefficients(alphas);
+    } else {
+      mppi_controller_->setPriors({});
+    }
+  } else {
+    // Explicitly reset priors to 0 (revert to 1 distribution) to avoid stickiness
+    mppi_controller_->setPriors({});
   }
 
   VehicleDynamics::state_array cur_state;

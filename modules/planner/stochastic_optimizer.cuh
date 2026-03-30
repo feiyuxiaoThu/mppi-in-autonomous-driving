@@ -13,14 +13,16 @@
 #include "common/protos/planning_info.pb.h"
 #include "common/protos/config.pb.h"
 #include "common/reference_line.hpp"
-#include "mppi/controllers/MPPI/mppi_controller.cuh"
 #include "mppi/feedback_controllers/DDP/ddp.cuh"
+#include "biased_mppi_controller.cuh"
+#include "common/trajectory_utils.hpp"
 #include "trajectory_cost.cuh"
 #include "vehicle_dynamics.cuh"
 #include "modules/visualizer/visualizer.hpp"
 
 #include <Eigen/Core>
 #include <memory>
+#include <vector>
 
 template <int NUM_ROLLOUTS>
 class StochasticOptimizer {
@@ -31,14 +33,15 @@ public:
 
   ControlInput plan_once(const StateInfo& _current_state,
                          const std::shared_ptr<ReferenceLine>& reference_line,
-                         const std::shared_ptr<common::ObstacleList>& obstacle_list);
+                         const std::shared_ptr<common::ObstacleList>& obstacle_list,
+                         const std::vector<E2EPriorMode>& e2e_priors = {});
   Eigen::MatrixXf get_optimized_trajectory() const;
   protos::planning::PlanningInfo get_debug_result(const StateInfo& current_state) const;
   void set_parameters_to_proto(protos::config::SimulationConfig* sim_config_ptr);
 
 private:
   using SAMPLER_T =
-    mppi::sampling_distributions::GaussianDistribution<VehicleDynamics::DYN_PARAMS_T>;
+    mppi::sampling_distributions::BiasedGaussianDistribution<VehicleDynamics::DYN_PARAMS_T>;
 
   void convert_parameters_to_proto(const TrajectoryCostParams& cost_params,
                                    const VehicleDynamics& vehicle_dynamics,
@@ -49,8 +52,8 @@ private:
   TrajectoryCost* trajectory_cost_ = nullptr;
   SAMPLER_T* sampler_ = nullptr;
   DDPFeedback<VehicleDynamics, kHorizonLength>* ddp_feedback_ = nullptr;
-  VanillaMPPIController<VehicleDynamics, TrajectoryCost,
-                        DDPFeedback<VehicleDynamics, kHorizonLength>, kHorizonLength, NUM_ROLLOUTS>*
+  BiasedMPPIController<VehicleDynamics, TrajectoryCost,
+                       DDPFeedback<VehicleDynamics, kHorizonLength>, kHorizonLength, NUM_ROLLOUTS>*
       mppi_controller_ = nullptr;
 
   float target_accel_ = 0.0;
