@@ -13,6 +13,7 @@ set(CMAKE_BUILD_RPATH "${PROJECT_SOURCE_DIR}/3rdparty/foxglove/lib")
 # Suppress CUDA warnings from Eigen library interactions
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe=--diag_suppress=20014>)
+add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe=--diag_suppress=20012>)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
@@ -78,6 +79,9 @@ file(GLOB PLANNER_SOURCES CONFIGURE_DEPENDS
     "modules/planner/*.cpp"
     "modules/planner/*.cu"
 )
+# Exclude biased_mppi_controller.cu from direct compilation as it's included in .cuh
+list(REMOVE_ITEM PLANNER_SOURCES "${PROJECT_SOURCE_DIR}/modules/planner/biased_mppi_controller.cu")
+
 file(GLOB VISUALIZER_SOURCES CONFIGURE_DEPENDS "modules/visualizer/*.cpp")
 file(GLOB COMMON_SOURCES CONFIGURE_DEPENDS "common/*.cpp")
 
