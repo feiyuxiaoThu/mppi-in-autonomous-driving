@@ -53,8 +53,13 @@ public:
                        const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(),
                        cudaStream_t stream = nullptr)
       : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, init_control_traj, stream) {
-    // FIX 1: Initialize alphas_ to avoid uninitialized read in single distribution path
     alphas_ = {1.0f};
+  }
+
+  virtual ~BiasedMPPIController() {
+    if (alphas_d_) {
+      cudaFree(alphas_d_);
+    }
   }
 
   void computeControl(const Eigen::Ref<const state_array>& state, int optimization_stride = 1) override;
@@ -72,10 +77,16 @@ public:
                                  ", got " + std::to_string(alphas.size()));
     }
     alphas_ = alphas;
+    int num_dist = alphas_.size();
+    if (!alphas_d_) {
+        HANDLE_ERROR(cudaMalloc(&alphas_d_, sizeof(float) * SAMPLING_T::SAMPLING_PARAMS_T::MAX_DISTRIBUTIONS));
+    }
+    HANDLE_ERROR(cudaMemcpy(alphas_d_, alphas_.data(), sizeof(float) * num_dist, cudaMemcpyHostToDevice));
   }
 
 protected:
   std::vector<float> alphas_;
+  float* alphas_d_ = nullptr;
 };
 
 #if __CUDACC__

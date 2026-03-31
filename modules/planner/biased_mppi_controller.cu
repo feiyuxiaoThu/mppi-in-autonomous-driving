@@ -15,9 +15,6 @@ namespace kernels {
 
 /**
  * @brief CUDA kernel to correct weights for Biased-MPPI using Log-Sum-Exp.
- * This kernel implements the importance sampling correction: 
- * S_tilde = S + lambda * (ln p(V) - ln q_s(V))
- * where p(V) is the nominal distribution (Distribution 0) and q_s(V) is the mixture distribution.
  */
 __global__ void BiasedWeightCorrectionKernel(
     float* trajectory_costs_d,
@@ -38,43 +35,36 @@ __global__ void BiasedWeightCorrectionKernel(
 
   int global_rollout_idx = dist_idx * num_rollouts_per_dist + rollout_idx_in_dist;
   
-  // Each rollout's control sequence u_i
   const float* u_i = &control_samples_d[global_rollout_idx * num_timesteps * control_dim];
 
-  // We need to calculate log likelihood of u_i under EACH distribution m
-  float log_q_m[16]; // MAX_DISTRIBUTIONS should be less than this
+  float log_q_m[16]; 
   float max_log_q = -1e30f;
 
   for (int m = 0; m < num_distributions; ++m) {
-  float log_likelihood = 0.0f;
-  const float* mu_m = &control_means_d[m * num_timesteps * control_dim];
-  // NOTE: In standard GaussianDistribution, std_dev is usually shared across all distributions
-  const float* sigma_shared = std_dev_d; 
+    float log_likelihood = 0.0f;
+    const float* mu_m = &control_means_d[m * num_timesteps * control_dim];
+    const float* sigma_shared = std_dev_d; 
 
-  for (int t = 0; t < num_timesteps; ++t) {
-    for (int c = 0; c < control_dim; ++c) {
-      float diff = u_i[t * control_dim + c] - mu_m[t * control_dim + c];
-      float sigma = fmaxf(sigma_shared[c], 1e-3f); // Safety floor for sigma
-      log_likelihood -= 0.5f * (diff * diff) / (sigma * sigma);
+    for (int t = 0; t < num_timesteps; ++t) {
+      for (int c = 0; c < control_dim; ++c) {
+        float diff = u_i[t * control_dim + c] - mu_m[t * control_dim + c];
+        float sigma = fmaxf(sigma_shared[c], 1e-3f); 
+        log_likelihood -= 0.5f * (diff * diff) / (sigma * sigma);
+      }
     }
-  }
-    // log(q_m(V)) = log(alpha_m * p_m(V)) = log(alpha_m) + log(p_m(V))
+    
     log_q_m[m] = logf(fmaxf(alphas_d[m], 1e-6f)) + log_likelihood;
     if (log_q_m[m] > max_log_q) max_log_q = log_q_m[m];
   }
 
-  // Log-Sum-Exp to get log(q_mix(V))
   float sum_exp = 0.0f;
   for (int m = 0; m < num_distributions; ++m) {
     sum_exp += expf(log_q_m[m] - max_log_q);
   }
   float log_q_mix = max_log_q + logf(sum_exp);
 
-  // We want the nominal distribution p(V) = p_0(V)
-  // Since log_q_m[0] = log(alpha_0) + log(p_0(V)), we have:
   float log_p_nominal = log_q_m[0] - logf(fmaxf(alphas_d[0], 1e-6f));
 
-  // Corrected cost S_tilde = S + lambda * (ln p(V) - ln q_mix(V))
   trajectory_costs_d[global_rollout_idx] += lambda * (log_p_nominal - log_q_mix);
 }
 
@@ -94,30 +84,27 @@ void BiasedMPPI::setPriors(const std::vector<control_trajectory>& priors) {
         throw std::runtime_error("Number of priors exceeds MAX_DISTRIBUTIONS");
     }
     
-    // If number of distributions changed, we need to update the sampler
     if (this->sampler_->getNumDistributions() != total_dist) {
+        // MUST reallocate sampler memory when distribution count changes
+        this->sampler_->deallocateCUDAMemory();
         this->sampler_->setNumDistributions(total_dist);
-        // Note: deallocateCUDAMemory/allocateCUDAMemoryHelper are internal to MPPIController
-        // If we change num_dist, we should ensure internal buffers are resized.
+        this->sampler_->allocateCUDAMemory();
+
+        // Also reallocate controller memory (trajectory_costs_d_, etc.)
         this->deallocateCUDAMemory();
-        this->allocateCUDAMemoryHelper(total_dist - 1); // nominal_size = total_dist - 1 means total_dist distributions
+        this->allocateCUDAMemoryHelper(total_dist - 1); 
     }
     
-    // Distribution 0 is ALWAYS the nominal distribution (warm start)
-    // Distribution 1..M are priors
     for (int i = 0; i < m; ++i) {
         this->sampler_->copyImportanceSamplerToDevice(priors[i].data(), i + 1, false);
     }
     
-    // Update alphas if they don't match the new distribution count
+    // Auto-generate alpha weights if they don't match the new distribution count
     if (alphas_.size() != (size_t)total_dist) {
-        if (total_dist == 1) {
-            alphas_ = {1.0f};
-        } else {
-            // Give 0.2 weight to nominal, 0.8 to priors evenly
-            alphas_.assign(total_dist, 0.8f / m);
-            alphas_[0] = 0.2f;
-        }
+        std::vector<float> default_alphas(total_dist, 0.8f / m);
+        if (total_dist == 1) default_alphas = {1.0f};
+        else default_alphas[0] = 0.2f;
+        this->setMixingCoefficients(default_alphas);
     }
 }
 
@@ -135,9 +122,11 @@ void BiasedMPPI::computeControl(const Eigen::Ref<const state_array>& state, int 
   // Use a local host vector for all rollout costs
   std::vector<float> h_trajectory_costs(total_rollouts);
   
-  float* alphas_d;
-  HANDLE_ERROR(cudaMalloc(&alphas_d, sizeof(float) * num_dist));
-  HANDLE_ERROR(cudaMemcpy(alphas_d, alphas_.data(), sizeof(float) * num_dist, cudaMemcpyHostToDevice));
+  // Ensure alphas_d_ is ready (should be handled by setMixingCoefficients)
+  if (!alphas_d_) {
+      std::vector<float> default_alphas(num_dist, 1.0f/num_dist);
+      this->setMixingCoefficients(default_alphas);
+  }
 
   float* control_samples_d = this->sampler_->getControlSamplesDevicePtr();
   float* control_means_d = this->sampler_->getControlMeansDevicePtr();
@@ -161,7 +150,7 @@ void BiasedMPPI::computeControl(const Eigen::Ref<const state_array>& state, int 
         control_samples_d,
         control_means_d,
         std_dev_d,
-        alphas_d,
+        alphas_d_,
         this->getLambda(),
         num_dist,
         rollouts_per_dist,
@@ -169,31 +158,36 @@ void BiasedMPPI::computeControl(const Eigen::Ref<const state_array>& state, int 
         DYN_T::CONTROL_DIM
     );
 
+    // CRITICAL FIX: Only use the first NUM_ROLLOUTS (Distribution 0) for baseline and normalizer calculation.
+    // Standard MPPI reduction kernels require power-of-2 input sizes (e.g. 4096).
+    // Using total_rollouts (e.g. 3*4096) causes misaligned address errors in樹状规约 kernels.
+    int aligned_rollouts = NUM_ROLLOUTS;
+
     HANDLE_ERROR(cudaMemcpyAsync(h_trajectory_costs.data(), this->trajectory_costs_d_,
-                                 total_rollouts * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
+                                 aligned_rollouts * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaStreamSynchronize(this->stream_));
 
-    float baseline = mppi::kernels::computeBaselineCost(h_trajectory_costs.data(), total_rollouts);
+    float baseline = mppi::kernels::computeBaselineCost(h_trajectory_costs.data(), aligned_rollouts);
     this->setBaseline(baseline);
     
-    mppi::kernels::launchNormExpKernel(total_rollouts, this->getNormExpThreads(), this->trajectory_costs_d_,
+    mppi::kernels::launchNormExpKernel(aligned_rollouts, this->getNormExpThreads(), this->trajectory_costs_d_,
                                        1.0 / this->getLambda(), this->getBaselineCost(), this->stream_, false);
     
     HANDLE_ERROR(cudaMemcpyAsync(h_trajectory_costs.data(), this->trajectory_costs_d_,
-                                 total_rollouts * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
+                                 aligned_rollouts * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaStreamSynchronize(this->stream_));
 
-    float normalizer = mppi::kernels::computeNormalizer(h_trajectory_costs.data(), total_rollouts);
+    float normalizer = mppi::kernels::computeNormalizer(h_trajectory_costs.data(), aligned_rollouts);
     this->setNormalizer(normalizer);
     
-    // UPDATE LOGIC: Perform global weighted reduction across ALL distributions to update Distribution 0 mean
+    // UPDATE LOGIC: Perform global weighted reduction across Distribution 0 rollouts
     mppi::kernels::launchWeightedReductionKernel<DYN_T::CONTROL_DIM>(
         this->trajectory_costs_d_,
         control_samples_d, 
         control_means_d, // Update Distribution 0 mean
         this->getNormalizerCost(),
         this->getNumTimesteps(),
-        total_rollouts,
+        aligned_rollouts,
         this->sampler_->getParams().sum_strides,
         this->stream_,
         false
@@ -201,8 +195,6 @@ void BiasedMPPI::computeControl(const Eigen::Ref<const state_array>& state, int 
 
     this->sampler_->setHostOptimalControlSequence(this->control_.data(), 0, true);
   }
-
-  HANDLE_ERROR(cudaFree(alphas_d));
 
   this->smoothControlTrajectory();
   this->computeStateTrajectory(state);
