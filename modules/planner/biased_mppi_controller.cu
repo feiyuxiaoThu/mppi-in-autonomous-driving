@@ -46,18 +46,18 @@ __global__ void BiasedWeightCorrectionKernel(
   float max_log_q = -1e30f;
 
   for (int m = 0; m < num_distributions; ++m) {
-    float log_likelihood = 0.0f;
-    const float* mu_m = &control_means_d[m * num_timesteps * control_dim];
-    const float* sigma_m = &std_dev_d[m * control_dim]; 
+  float log_likelihood = 0.0f;
+  const float* mu_m = &control_means_d[m * num_timesteps * control_dim];
+  // NOTE: In standard GaussianDistribution, std_dev is usually shared across all distributions
+  const float* sigma_shared = std_dev_d; 
 
-    for (int t = 0; t < num_timesteps; ++t) {
-      for (int c = 0; c < control_dim; ++c) {
-        float diff = u_i[t * control_dim + c] - mu_m[t * control_dim + c];
-        float sigma = sigma_m[c];
-        log_likelihood -= 0.5f * (diff * diff) / (sigma * sigma);
-      }
+  for (int t = 0; t < num_timesteps; ++t) {
+    for (int c = 0; c < control_dim; ++c) {
+      float diff = u_i[t * control_dim + c] - mu_m[t * control_dim + c];
+      float sigma = fmaxf(sigma_shared[c], 1e-3f); // Safety floor for sigma
+      log_likelihood -= 0.5f * (diff * diff) / (sigma * sigma);
     }
-    
+  }
     // log(q_m(V)) = log(alpha_m * p_m(V)) = log(alpha_m) + log(p_m(V))
     log_q_m[m] = logf(fmaxf(alphas_d[m], 1e-6f)) + log_likelihood;
     if (log_q_m[m] > max_log_q) max_log_q = log_q_m[m];
