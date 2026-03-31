@@ -42,9 +42,11 @@
 
 ### 修复策略
 *   **显式重分配序列**：在修改关键状态参数（如分布数、时间步长）后，必须执行：
-    1.  `deallocateCUDAMemory()`
-    2.  更新状态变量
-    3.  `allocateCUDAMemory()`
+    1.  `sampler_->freeCudaMem()` (采样分布释放)
+    2.  更新分布数
+    3.  `sampler_->allocateCUDAMemoryHelper()` (采样分布分配)
+    4.  `this->deallocateCUDAMemory()` (控制器内部释放)
+    5.  `this->allocateCUDAMemoryHelper(...)` (控制器内部重新分配)
 *   **RAII 原则**：确保在析构函数中释放自定义的设备内存（如 `alphas_d_`），避免显存泄漏。
 
 ---

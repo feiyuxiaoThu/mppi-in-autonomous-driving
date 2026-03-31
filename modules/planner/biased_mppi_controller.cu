@@ -86,9 +86,9 @@ void BiasedMPPI::setPriors(const std::vector<control_trajectory>& priors) {
     
     if (this->sampler_->getNumDistributions() != total_dist) {
         // MUST reallocate sampler memory when distribution count changes
-        this->sampler_->deallocateCUDAMemory();
+        this->sampler_->freeCudaMem();
         this->sampler_->setNumDistributions(total_dist);
-        this->sampler_->allocateCUDAMemory();
+        this->sampler_->allocateCUDAMemoryHelper();
 
         // Also reallocate controller memory (trajectory_costs_d_, etc.)
         this->deallocateCUDAMemory();

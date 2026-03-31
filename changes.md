@@ -15,10 +15,10 @@
 - **Alpha 权重决策**：支持优先使用上游校准的 `alpha` 字段，若缺失则自动降级为基于 `confidence` 的归一化分配。
 
 ## 4. 工程安全与健壮性 (Engineering & Robustness)
-- **接口安全升级**：移除了不安全的 `Proxy` 强转类，为采样分布基类增加了显式的设备指针访问接口。
-- **自洽性修复**：修复了 `common.hpp` 缺失头文件及 `trajectory_utils.hpp` 中的拼写错误。
-- **输入校验**：在 `setMixingCoefficients` 中增加了严格的数组长度检查，防止 OOB（越界）读写。
+- **规约对齐修复**：针对 MPPI-Generic 内部规约核函数（Baseline/Normalizer/Reduction）要求 2 的幂次样本量的特性，通过在 Distribution 0 上执行对齐规约，解决了多分布总样本量非 2 幂次导致的 `misaligned address` 崩溃。
+- **内存生命周期管理**：修正了 Sampler 类显存释放/申请的正确接口名（`freeCudaMem` / `allocateCUDAMemoryHelper`），并在分布数变化时强制刷新显存 Buffer，消除了内存越界风险。
+- **构建系统优化**：在 `CMakeLists.txt` 中排除了模板实现文件，并压制了 Eigen 库产生的 CUDA 编译警告。
 
 ## 5. 验证状态 (Validation)
-- **数学验证**：已通过 `test_bias_mppi_math.cpp` 完成了 Nominal-heavy, Prior-heavy, Balanced 三种极端场景下的数值走查，结果完全符合 Bias-MPPI 理论预期。
-- **仿真 Demo**：`biased_mppi_demo.cpp` 已更新为 0.7/0.3 置信度的双模态模拟环境。
+- **数学验证**：已通过 `test_bias_mppi_math.cpp` 完成了数值走查。
+- **编译验证**：修复了 Demo 中的 API 调用错误，目前全链路已通过编译。
