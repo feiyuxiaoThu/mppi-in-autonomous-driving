@@ -22,14 +22,26 @@ std::vector<E2EPriorMode> GenerateDummyE2EPriors(
     const StateInfo& ego_state, const std::shared_ptr<ReferenceLine>& ref_line, int horizon, double dt) {
   
   std::vector<E2EPriorMode> priors;
-  if (!ref_line) return priors;
+  if (!ref_line || ref_line->size() == 0) return priors;
 
-  // Prior 1: Left bias (offset = +2.0m), Confidence = 0.7
-  // Prior 2: Right bias (offset = -2.0m), Confidence = 0.3
+  // Find the closest point in the reference line to the ego state
+  double min_dist = std::numeric_limits<double>::max();
+  double cur_s = 0.0;
+  
+  for (size_t i = 0; i < ref_line->size(); ++i) {
+    auto pt = ref_line->at(i);
+    double dx = ego_state.x - pt.x();
+    double dy = ego_state.y - pt.y();
+    double dist = dx * dx + dy * dy;
+    if (dist < min_dist) {
+      min_dist = dist;
+      cur_s = ref_line->longitude_[i];
+    }
+  }
+
+  // Prior 1: Left bias (offset = +2.5m), Confidence = 0.7
+  // Prior 2: Right bias (offset = -2.5m), Confidence = 0.3
   std::vector<std::pair<double, float>> offsets_with_conf = {{2.5, 0.7f}, {-2.5, 0.3f}};
-
-  double cur_s, cur_l;
-  ref_line->XYToSL(ego_state.x, ego_state.y, &cur_s, &cur_l);
 
   int mode_id = 0;
   for (const auto& pair : offsets_with_conf) {
@@ -39,12 +51,18 @@ std::vector<E2EPriorMode> GenerateDummyE2EPriors(
     std::vector<PathPoint> path;
     for (int i = 0; i < horizon + 2; ++i) {
       double target_s = cur_s + std::max(ego_state.velocity, 5.0) * i * dt;
-      double x, y, yaw;
-      // Simple offset: in a real E2E this would be a complex curve
-      ref_line->GetXY(target_s, offset, x, y);
-      yaw = ref_line->GetYaw(target_s);
+      target_s = std::min(target_s, ref_line->length());
+
+      Eigen::Vector3d ref_pt = ref_line->calc_position(target_s);
+      double rx = ref_pt.x();
+      double ry = ref_pt.y();
+      double ryaw = ref_pt.z();
       
-      path.push_back({x, y, yaw, std::max(ego_state.velocity, 5.0), i * dt});
+      // Calculate offset position along the normal of the reference line
+      double x = rx - offset * std::sin(ryaw);
+      double y = ry + offset * std::cos(ryaw);
+      
+      path.push_back({x, y, ryaw, std::max(ego_state.velocity, 5.0), i * dt});
     }
     
     E2EPriorMode mode;
@@ -97,9 +115,6 @@ int main(int argc, char** argv) {
     visualizer->log_reference_line(reference_line);
     visualizer->log_obstacles(obstacle_list, ego_state, 100.0);
     
-    // Log the priors for visualization in Foxglove (optional, using custom marker if needed)
-    // For now, let's just see how MPPI converges to one of them.
-
     spdlog::info("Frame: v={:.2f}, priors_count={}, cost={:.2f}ms", 
                  ego_state.velocity, e2e_priors.size(), frame_timer.toc() * 1000.0);
 
